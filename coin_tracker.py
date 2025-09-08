@@ -443,6 +443,14 @@ def main():
                     else:
                         st.error("📤 " + message)
                 
+                # 自動JSON送信
+                if auto_send_json and webhook_url:
+                    success, message = send_json_to_discord(webhook_url, data)
+                    if success:
+                        st.success("📄 " + message)
+                    else:
+                        st.error("📄 " + message)
+                
                 # 入力フォームをリセット（オプション）
                 st.rerun()
             else:
@@ -459,6 +467,17 @@ def main():
                     st.error("📤 " + message)
             else:
                 st.error("❌ 正しいコイン数を入力してください")
+        
+        # 手動JSON送信処理
+        if manual_json_send:
+            if data:
+                success, message = send_json_to_discord(webhook_url, data)
+                if success:
+                    st.success("📄 " + message)
+                else:
+                    st.error("📄 " + message)
+            else:
+                st.error("❌ 送信するデータがありません")
     
     # データ表示
     if data and selected_tsum and selected_tsum in data:
