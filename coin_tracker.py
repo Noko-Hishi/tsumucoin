@@ -88,6 +88,58 @@ def send_to_discord(webhook_url, tsum_name, record, use_5to4=False, use_plus_coi
     except Exception as e:
         return False, f"❌ エラー: {str(e)}"
 
+def send_json_to_discord(webhook_url, json_data, filename="coin_data_multi.json"):
+    """Discord WebhookにJSONファイルを添付ファイルとして送信"""
+    if not webhook_url:
+        return False, "Webhook URLが設定されていません"
+    
+    try:
+        # JSONデータを文字列に変換
+        json_string = json.dumps(json_data, ensure_ascii=False, indent=2)
+        json_bytes = json_string.encode('utf-8')
+        
+        # 統計情報を計算
+        total_tsums = len(json_data)
+        total_records = sum(len(records) for records in json_data.values())
+        
+        # 埋め込みメッセージ
+        embed = {
+            "title": "📄 ツムツム データバックアップ",
+            "description": f"**{filename}** をアップロードしました",
+            "color": 0x0099ff,  # 青色
+            "timestamp": datetime.now().isoformat(),
+            "fields": [
+                {
+                    "name": "📊 統計情報",
+                    "value": f"🎯 ツム数: **{total_tsums}**\n📝 総記録数: **{total_records}**",
+                    "inline": False
+                }
+            ],
+            "footer": {
+                "text": "ツムツム コイン記録ツール - データバックアップ"
+            }
+        }
+        
+        # マルチパートフォームデータを作成
+        files = {
+            'file': (filename, json_bytes, 'application/json')
+        }
+        
+        payload = {
+            'username': 'ツムツム記録Bot',
+            'embeds': [embed]
+        }
+        
+        response = requests.post(webhook_url, data={'payload_json': json.dumps(payload)}, files=files)
+        
+        if response.status_code == 200:
+            return True, f"✅ JSONファイル ({filename}) をDiscordに送信成功"
+        else:
+            return False, f"❌ 送信失敗: {response.status_code}"
+            
+    except Exception as e:
+        return False, f"❌ エラー: {str(e)}"
+
 def load_existing_data():
     """既存のJSONデータを読み込む（ファイルとセッション状態から）"""
     if 'coin_data' not in st.session_state:
@@ -182,20 +234,50 @@ def main():
         )
         st.session_state.auto_send_discord = auto_send_discord
         
+        # JSON自動送信設定
+        auto_send_json = st.checkbox(
+            "📄 データ変更時にJSONファイルも送信",
+            value=st.session_state.get('auto_send_json', False),
+            help="記録を追加した際にJSONファイル全体もDiscordに送信します（バックアップ用）"
+        )
+        st.session_state.auto_send_json = auto_send_json
+        
         # Webhook テスト
         if webhook_url:
-            if st.button("🧪 Webhook テスト", help="Discord接続をテストします"):
-                test_record = {
-                    "base": 1000,
-                    "boost": 2000,
-                    "final": 2000,
-                    "rate": 2.0
-                }
-                success, message = send_to_discord(webhook_url, "テストツム", test_record)
-                if success:
-                    st.success(message)
-                else:
-                    st.error(message)
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🧪 記録テスト", help="Discord接続をテストします"):
+                    test_record = {
+                        "base": 1000,
+                        "boost": 2000,
+                        "final": 2000,
+                        "rate_raw": 2.0,
+                        "rate": 2.0
+                    }
+                    success, message = send_to_discord(webhook_url, "テストツム", test_record)
+                    if success:
+                        st.success(message)
+                    else:
+                        st.error(message)
+            
+            with col2:
+                if st.button("📄 JSON送信テスト", help="JSONファイル送信をテストします"):
+                    test_data = {
+                        "テストツム": [
+                            {
+                                "base": 1000,
+                                "boost": 2000,
+                                "final": 2000,
+                                "rate_raw": 2.0,
+                                "rate": 2.0
+                            }
+                        ]
+                    }
+                    success, message = send_json_to_discord(webhook_url, test_data, "test_data.json")
+                    if success:
+                        st.success(message)
+                    else:
+                        st.error(message)
         
         st.divider()
         
@@ -412,14 +494,30 @@ def main():
                     item_cost += 500
                 st.info(f"アイテムコスト: {item_cost:,}コイン")
         
-        # 記録追加ボタン（メインとDiscord送信を分離）
-        col1, col2 = st.columns([2, 1])
+        # セッション状態から設定を取得
+        webhook_url = st.session_state.get('discord_webhook_url', '')
+        auto_send_discord = st.session_state.get('auto_send_discord', False)
+        auto_send_json = st.session_state.get('auto_send_json', False)
         
-        with col1:
+        # ボタンを初期化
+        add_record_btn = False
+        manual_discord_send = False
+        manual_json_send = False
+        
+        # 記録追加ボタン
+        if webhook_url:
+            col1, col2, col3 = st.columns([2, 1, 1])
+            
+            with col1:
+                add_record_btn = st.button("📝 記録を追加", type="primary", use_container_width=True)
+            
+            with col2:
+                manual_discord_send = st.button("📤 記録送信", use_container_width=True)
+            
+            with col3:
+                manual_json_send = st.button("📄 JSON送信", use_container_width=True)
+        else:
             add_record_btn = st.button("📝 記録を追加", type="primary", use_container_width=True)
-        
-        with col2:
-            manual_discord_send = st.button("📤 Discordに送信", use_container_width=True, disabled=not webhook_url)
         
         # 記録追加処理
         if add_record_btn:
