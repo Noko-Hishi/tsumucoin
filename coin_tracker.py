@@ -3,7 +3,9 @@ import streamlit as st
 import json
 import math
 import os
+import requests
 from io import StringIO
+from datetime import datetime
 
 # 設定
 DATA_FILE = "coin_data_multi.json"
@@ -14,6 +16,77 @@ def snap_rate_to_multiplier(rate: float) -> float:
     if rate <= 0 or math.isnan(rate) or math.isinf(rate):
         return rate
     return min(COIN_MULTIPLIERS, key=lambda m: abs(m - rate))
+
+def send_to_discord(webhook_url, tsum_name, record, use_5to4=False, use_plus_coin=False):
+    """Discord Webhookに記録を送信"""
+    if not webhook_url:
+        return False, "Webhook URLが設定されていません"
+    
+    # アイテム情報
+    items_used = []
+    if use_5to4:
+        items_used.append("5→4")
+    if use_plus_coin:
+        items_used.append("+Coin")
+    
+    items_text = f" (アイテム: {', '.join(items_used)})" if items_used else ""
+    
+    # 埋め込みメッセージを作成
+    embed = {
+        "title": "🪙 ツムツム コイン記録",
+        "color": 0x00ff00,  # 緑色
+        "timestamp": datetime.now().isoformat(),
+        "fields": [
+            {
+                "name": "🎯 ツム",
+                "value": tsum_name,
+                "inline": True
+            },
+            {
+                "name": "💰 ベースコイン",
+                "value": f"{record['base']:,}",
+                "inline": True
+            },
+            {
+                "name": "🚀 最終コイン",
+                "value": f"{record['boost']:,}",
+                "inline": True
+            },
+            {
+                "name": "📈 倍率",
+                "value": f"**{record['rate']}x**",
+                "inline": True
+            },
+            {
+                "name": "💎 実質獲得",
+                "value": f"{record['final']:,}",
+                "inline": True
+            },
+            {
+                "name": "⚡ アイテム",
+                "value": items_text if items_text else "なし",
+                "inline": True
+            }
+        ],
+        "footer": {
+            "text": "ツムツム コイン記録ツール"
+        }
+    }
+    
+    # Webhook送信データ
+    data = {
+        "username": "ツムツム記録Bot",
+        "embeds": [embed]
+    }
+    
+    try:
+        response = requests.post(webhook_url, json=data)
+        if response.status_code == 204:
+            return True, "✅ Discordに送信成功"
+        else:
+            return False, f"❌ 送信失敗: {response.status_code}"
+    except Exception as e:
+        return False, f"❌ エラー: {str(e)}"
 
 def load_existing_data():
     """既存のJSONデータを読み込む（ファイルとセッション状態から）"""
@@ -78,10 +151,54 @@ def main():
     )
     
     st.title("🪙 ツムツム コイン記録ツール")
-    st.subheader("スマートフォン対応データ入力アプリ")
+    st.subheader("Discord Webhook対応 データ入力アプリ")
     
-    # サイドバーでJSONファイルアップロード
+    # サイドバーでDiscord設定とデータ管理
     with st.sidebar:
+        # Discord Webhook設定
+        st.header("🔗 Discord設定")
+        
+        # Webhook URLの入力（セッション状態で保持）
+        if 'discord_webhook_url' not in st.session_state:
+            st.session_state.discord_webhook_url = ""
+        
+        webhook_url = st.text_input(
+            "Discord Webhook URL",
+            value=st.session_state.discord_webhook_url,
+            type="password",
+            placeholder="https://discord.com/api/webhooks/...",
+            help="DiscordサーバーのWebhook URLを入力してください"
+        )
+        
+        # Webhook URLをセッション状態に保存
+        if webhook_url != st.session_state.discord_webhook_url:
+            st.session_state.discord_webhook_url = webhook_url
+        
+        # 自動送信設定
+        auto_send_discord = st.checkbox(
+            "📤 記録追加時に自動でDiscordに送信",
+            value=st.session_state.get('auto_send_discord', True),
+            help="記録を追加した際に自動的にDiscordに送信します"
+        )
+        st.session_state.auto_send_discord = auto_send_discord
+        
+        # Webhook テスト
+        if webhook_url:
+            if st.button("🧪 Webhook テスト", help="Discord接続をテストします"):
+                test_record = {
+                    "base": 1000,
+                    "boost": 2000,
+                    "final": 2000,
+                    "rate": 2.0
+                }
+                success, message = send_to_discord(webhook_url, "テストツム", test_record)
+                if success:
+                    st.success(message)
+                else:
+                    st.error(message)
+        
+        st.divider()
+        
         st.header("📁 データ管理")
         
         # 既存JSONファイルのアップロード
@@ -295,8 +412,17 @@ def main():
                     item_cost += 500
                 st.info(f"アイテムコスト: {item_cost:,}コイン")
         
-        # 記録追加ボタン
-        if st.button("📝 記録を追加", type="primary", use_container_width=True):
+        # 記録追加ボタン（メインとDiscord送信を分離）
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            add_record_btn = st.button("📝 記録を追加", type="primary", use_container_width=True)
+        
+        with col2:
+            manual_discord_send = st.button("📤 Discordに送信", use_container_width=True, disabled=not webhook_url)
+        
+        # 記録追加処理
+        if add_record_btn:
             if base_coin > 0 and boost_coin > 0:
                 record = calculate_record(base_coin, boost_coin, use_5to4, use_plus_coin)
                 
@@ -307,107 +433,75 @@ def main():
                 data[selected_tsum].append(record)
                 save_data_to_session(data)
                 
-                st.success(f"✅ {selected_tsum}の記録を追加しました！")
+                st.success(f"✅ {selected_tsum} の記録を追加しました！")
+                
+                # 自動Discord送信
+                if auto_send_discord and webhook_url:
+                    success, message = send_to_discord(webhook_url, selected_tsum, record, use_5to4, use_plus_coin)
+                    if success:
+                        st.success("📤 " + message)
+                    else:
+                        st.error("📤 " + message)
+                
+                # 入力フォームをリセット（オプション）
                 st.rerun()
             else:
-                st.error("正しいコイン数を入力してください")
+                st.error("❌ 正しいコイン数を入力してください")
+        
+        # 手動Discord送信処理
+        if manual_discord_send:
+            if base_coin > 0 and boost_coin > 0:
+                record = calculate_record(base_coin, boost_coin, use_5to4, use_plus_coin)
+                success, message = send_to_discord(webhook_url, selected_tsum, record, use_5to4, use_plus_coin)
+                if success:
+                    st.success("📤 " + message)
+                else:
+                    st.error("📤 " + message)
+            else:
+                st.error("❌ 正しいコイン数を入力してください")
     
-    # 現在のデータ表示
-    if selected_tsum and selected_tsum in data and data[selected_tsum]:
-        st.header(f"📈 {selected_tsum} の記録")
+    # データ表示
+    if data and selected_tsum and selected_tsum in data:
+        st.header(f"📋 {selected_tsum} の記録履歴")
         
         records = data[selected_tsum]
-        
-        # 統計情報
-        col1, col2, col3, col4 = st.columns(4)
-        
-        total_records = len(records)
-        total_final = sum(r["final"] for r in records)
-        avg_base = sum(r["base"] for r in records) / total_records
-        avg_final = sum(r["final"] for r in records) / total_records
-        avg_rate = sum(r["rate"] for r in records) / total_records
-        
-        with col1:
-            st.metric("プレイ回数", total_records)
-        with col2:
-            st.metric("合計Final", f"{total_final:,}")
-        with col3:
-            st.metric("平均Final", f"{avg_final:,.0f}")
-        with col4:
-            st.metric("平均倍率", f"{avg_rate:.3f}")
-        
-        # 最新の記録表示（最新10件）
-        st.subheader("📋 最新の記録")
-        recent_records = records[-10:][::-1]  # 最新10件を逆順で表示
-        
-        # テーブル形式で表示
-        table_data = []
-        for i, record in enumerate(recent_records):
-            table_data.append({
-                "No.": len(records) - i,
-                "ベース": f"{record['base']:,}",
-                "Boost": f"{record['boost']:,}",
-                "Final": f"{record['final']:,}",
-                "倍率": f"{record['rate']:.3f}"
-            })
-        
-        st.dataframe(table_data, use_container_width=True)
-        
-        # 記録削除機能
-        if st.button("🗑️ 最新の記録を削除", help="最後に追加した記録を削除します"):
-            if st.session_state.get('confirm_delete', False):
-                data[selected_tsum].pop()
-                if not data[selected_tsum]:  # 記録が空になった場合
-                    del data[selected_tsum]
-                save_data_to_session(data)
-                st.session_state.confirm_delete = False
-                st.success("記録を削除しました")
-                st.rerun()
-            else:
-                st.session_state.confirm_delete = True
-                st.warning("もう一度クリックして削除を確定してください")
-    
-    # データダウンロード
-    st.header("💾 データダウンロード")
-    
-    if data:
-        # JSON文字列を生成
-        json_str = json.dumps(data, ensure_ascii=False, indent=2)
-        
-        col1, col2 = st.columns([3, 1])
-        
-        with col1:
-            st.text_area(
-                "JSON データプレビュー",
-                json_str,
-                height=200,
-                help="PCツールで読み込み可能なJSON形式"
-            )
-        
-        with col2:
-            st.download_button(
-                label="📥 JSONファイルをダウンロード",
-                data=json_str,
-                file_name="coin_data_multi.json",
-                mime="application/json",
-                help="PCツール用のJSONファイルとしてダウンロード",
-                use_container_width=True
-            )
+        if records:
+            # 最新の記録から表示
+            records_reversed = list(reversed(records))
+            
+            # テーブル形式で表示
+            import pandas as pd
+            
+            df_records = []
+            for i, record in enumerate(records_reversed):
+                df_records.append({
+                    "No.": len(records) - i,
+                    "ベースコイン": f"{record['base']:,}",
+                    "Boostコイン": f"{record['boost']:,}",
+                    "Finalコイン": f"{record['final']:,}",
+                    "倍率": f"{record['rate']:.3f}",
+                })
+            
+            df = pd.DataFrame(df_records)
+            st.dataframe(df, use_container_width=True)
             
             # 統計情報
-            total_tsums = len(data)
-            total_records = sum(len(records) for records in data.values())
-            st.metric("ツム数", total_tsums)
-            st.metric("総記録数", total_records)
-    else:
-        st.info("まだデータがありません。ツムを選択して記録を追加してください。")
-    
-    # フッター
-    st.markdown("---")
-    st.markdown(
-        "**ツムツム コイン記録ツール** - PCツール互換のスマートフォン対応データ入力アプリ  \n"
-        "作成されたJSONファイルはPCツールで直接読み込み可能です。"
-    )
+            st.subheader("📊 統計情報")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            avg_rate = sum(r["rate"] for r in records) / len(records)
+            max_rate = max(r["rate"] for r in records)
+            min_rate = min(r["rate"] for r in records)
+            total_final = sum(r["final"] for r in records)
+            
+            with col1:
+                st.metric("平均倍率", f"{avg_rate:.3f}")
+            with col2:
+                st.metric("最高倍率", f"{max_rate:.3f}")
+            with col3:
+                st.metric("最低倍率", f"{min_rate:.3f}")
+            with col4:
+                st.metric("総獲得コイン", f"{total_final:,}")
 
 if __name__ == "__main__":
     main()
