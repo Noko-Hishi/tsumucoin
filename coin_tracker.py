@@ -619,6 +619,63 @@ def main():
                 st.metric("最低倍率", f"{min_rate:.3f}")
             with col4:
                 st.metric("総獲得コイン", f"{total_final:,}")
+            
+            # 記録削除機能
+            st.divider()
+            if st.button("🗑️ 最新の記録を削除", help="最後に追加した記録を削除します"):
+                if st.session_state.get('confirm_delete', False):
+                    data[selected_tsum].pop()
+                    if not data[selected_tsum]:  # 記録が空になった場合
+                        del data[selected_tsum]
+                    save_data_to_session(data)
+                    st.session_state.confirm_delete = False
+                    st.success("記録を削除しました")
+                    st.rerun()
+                else:
+                    st.session_state.confirm_delete = True
+                    st.warning("もう一度クリックして削除を確定してください")
+    
+    # データダウンロード機能も追加
+    st.header("💾 データダウンロード")
+    
+    if data:
+        # JSON文字列を生成
+        json_str = json.dumps(data, ensure_ascii=False, indent=2)
+        
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            st.text_area(
+                "JSON データプレビュー",
+                json_str,
+                height=200,
+                help="PCツールで読み込み可能なJSON形式"
+            )
+        
+        with col2:
+            st.download_button(
+                label="📥 JSONファイルをダウンロード",
+                data=json_str,
+                file_name="coin_data_multi.json",
+                mime="application/json",
+                help="PCツール用のJSONファイルとしてダウンロード",
+                use_container_width=True
+            )
+            
+            # 統計情報
+            total_tsums = len(data)
+            total_records = sum(len(records) for records in data.values())
+            st.metric("ツム数", total_tsums)
+            st.metric("総記録数", total_records)
+    else:
+        st.info("まだデータがありません。ツムを選択して記録を追加してください。")
+    
+    # フッター
+    st.markdown("---")
+    st.markdown(
+        "**ツムツム コイン記録ツール** - PCツール互換のスマートフォン対応データ入力アプリ  \n"
+        "作成されたJSONファイルはPCツールで直接読み込み可能です。"
+    )
 
 if __name__ == "__main__":
     main()
