@@ -4,6 +4,7 @@ import json
 import math
 import os
 import requests
+import pandas as pd
 from io import StringIO
 from datetime import datetime
 
@@ -313,8 +314,7 @@ def main():
         if os.path.exists(DATA_FILE):
             file_size = os.path.getsize(DATA_FILE)
             file_mtime = os.path.getmtime(DATA_FILE)
-            import datetime
-            last_modified = datetime.datetime.fromtimestamp(file_mtime).strftime("%Y-%m-%d %H:%M:%S")
+            last_modified = datetime.fromtimestamp(file_mtime).strftime("%Y-%m-%d %H:%M:%S")
             
             st.success("✅ ファイルが存在します")
             st.write(f"**ファイルサイズ**: {file_size} bytes")
@@ -494,30 +494,29 @@ def main():
                     item_cost += 500
                 st.info(f"アイテムコスト: {item_cost:,}コイン")
         
-        # セッション状態から設定を取得
+        # Discord設定を取得
         webhook_url = st.session_state.get('discord_webhook_url', '')
         auto_send_discord = st.session_state.get('auto_send_discord', False)
         auto_send_json = st.session_state.get('auto_send_json', False)
         
-        # ボタンを初期化
-        add_record_btn = False
-        manual_discord_send = False
-        manual_json_send = False
-        
-        # 記録追加ボタン
+        # 記録追加ボタン（Discord機能の有無で分岐）
         if webhook_url:
+            # Discord機能が有効な場合：3つのボタン
             col1, col2, col3 = st.columns([2, 1, 1])
             
             with col1:
                 add_record_btn = st.button("📝 記録を追加", type="primary", use_container_width=True)
             
             with col2:
-                manual_discord_send = st.button("📤 記録送信", use_container_width=True)
+                manual_discord_send = st.button("📤 記録送信", use_container_width=True, help="現在の記録をDiscordに送信")
             
             with col3:
-                manual_json_send = st.button("📄 JSON送信", use_container_width=True)
+                manual_json_send = st.button("📄 JSON送信", use_container_width=True, help="全データをJSONファイルとしてDiscordに送信")
         else:
+            # Discord機能が無効な場合：記録追加のみ
             add_record_btn = st.button("📝 記録を追加", type="primary", use_container_width=True)
+            manual_discord_send = False
+            manual_json_send = False
         
         # 記録追加処理
         if add_record_btn:
@@ -587,8 +586,6 @@ def main():
             records_reversed = list(reversed(records))
             
             # テーブル形式で表示
-            import pandas as pd
-            
             df_records = []
             for i, record in enumerate(records_reversed):
                 df_records.append({
@@ -620,22 +617,34 @@ def main():
             with col4:
                 st.metric("総獲得コイン", f"{total_final:,}")
             
-            # 記録削除機能
+            # 記録削除機能とJSON送信ボタン
             st.divider()
-            if st.button("🗑️ 最新の記録を削除", help="最後に追加した記録を削除します"):
-                if st.session_state.get('confirm_delete', False):
-                    data[selected_tsum].pop()
-                    if not data[selected_tsum]:  # 記録が空になった場合
-                        del data[selected_tsum]
-                    save_data_to_session(data)
-                    st.session_state.confirm_delete = False
-                    st.success("記録を削除しました")
-                    st.rerun()
-                else:
-                    st.session_state.confirm_delete = True
-                    st.warning("もう一度クリックして削除を確定してください")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🗑️ 最新の記録を削除", help="最後に追加した記録を削除します"):
+                    if st.session_state.get('confirm_delete', False):
+                        data[selected_tsum].pop()
+                        if not data[selected_tsum]:  # 記録が空になった場合
+                            del data[selected_tsum]
+                        save_data_to_session(data)
+                        st.session_state.confirm_delete = False
+                        st.success("記録を削除しました")
+                        st.rerun()
+                    else:
+                        st.session_state.confirm_delete = True
+                        st.warning("もう一度クリックして削除を確定してください")
+            
+            with col2:
+                # JSONファイル送信ボタン（記録がある場合のみ表示）
+                webhook_url_for_json = st.session_state.get('discord_webhook_url', '')
+                if webhook_url_for_json and st.button("📄 全記録をDiscordに送信", help="現在のすべてのデータをJSONファイルとしてDiscordに送信"):
+                    success, message = send_json_to_discord(webhook_url_for_json, data)
+                    if success:
+                        st.success("📄 " + message)
+                    else:
+                        st.error("📄 " + message)
     
-    # データダウンロード機能も追加
+    # データダウンロード機能
     st.header("💾 データダウンロード")
     
     if data:
