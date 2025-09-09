@@ -316,7 +316,7 @@ def main():
         # GitHub設定の入力（セッション状態で保持）
         github_token = st.text_input(
             "GitHub Personal Access Token",
-            value=st.session_state.get('github_token', ''),
+            value=st.session_state.get('github_token', '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'),
             type="password",
             placeholder="ghp_xxxxxxxxxxxx",
             help="GitHubのPersonal Access Tokenを入力してください。repo権限が必要です。"
@@ -325,7 +325,7 @@ def main():
         
         github_owner = st.text_input(
             "GitHubユーザー名/組織名",
-            value=st.session_state.get('github_owner', ''),
+            value=st.session_state.get('github_owner', 'Noko-Hishi'),
             placeholder="your-username",
             help="GitHubのユーザー名または組織名"
         )
@@ -333,7 +333,7 @@ def main():
         
         github_repo = st.text_input(
             "リポジトリ名",
-            value=st.session_state.get('github_repo', ''),
+            value=st.session_state.get('github_repo', 'tsumucoin'),
             placeholder="tsum-coin-data",
             help="データを保存するリポジトリ名"
         )
@@ -372,7 +372,7 @@ def main():
         # Webhook URLの入力（セッション状態で保持）
         webhook_url = st.text_input(
             "Discord Webhook URL",
-            value=st.session_state.get('discord_webhook_url', ''),
+            value=st.session_state.get('discord_webhook_url', 'https://discord.com/api/webhooks/1413040386443837490/8WcOdeEa51RCO95I6RrliGK5VnXotZqqCd2xb-YvNTRt3xXGlKavny5kjEAs7Z_gGPei'),
             type="password",
             placeholder="https://discord.com/api/webhooks/...",
             help="DiscordサーバーのWebhook URLを入力してください"
