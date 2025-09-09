@@ -382,7 +382,7 @@ def main():
         # 自動送信設定
         auto_send_discord = st.checkbox(
             "📤 記録追加時に自動でDiscordに送信",
-            value=st.session_state.get('auto_send_discord', True),
+            value=st.session_state.get('auto_send_discord', False),
             help="記録を追加した際に自動的にDiscordに送信します"
         )
         st.session_state.auto_send_discord = auto_send_discord
