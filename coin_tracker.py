@@ -316,7 +316,7 @@ def main():
         # GitHub設定の入力（セッション状態で保持）
         github_token = st.text_input(
             "GitHub Personal Access Token",
-            value=st.session_state.get('github_token', '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'),
+            value=st.session_state.get('github_token', ''),
             type="password",
             placeholder="ghp_xxxxxxxxxxxx",
             help="GitHubのPersonal Access Tokenを入力してください。repo権限が必要です。"
@@ -325,7 +325,7 @@ def main():
         
         github_owner = st.text_input(
             "GitHubユーザー名/組織名",
-            value=st.session_state.get('github_owner', 'Noko-Hishi'),
+            value=st.session_state.get('github_owner', ''),
             placeholder="your-username",
             help="GitHubのユーザー名または組織名"
         )
@@ -333,7 +333,7 @@ def main():
         
         github_repo = st.text_input(
             "リポジトリ名",
-            value=st.session_state.get('github_repo', 'tsumucoin'),
+            value=st.session_state.get('github_repo', ''),
             placeholder="tsum-coin-data",
             help="データを保存するリポジトリ名"
         )
