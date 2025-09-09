@@ -318,7 +318,7 @@ def main():
             "GitHub Personal Access Token",
             value=st.session_state.get('github_token', ''),
             type="password",
-            placeholder="ghp_xxxxxxxxxxxx",
+            placeholder="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",
             help="GitHubのPersonal Access Tokenを入力してください。repo権限が必要です。"
         )
         st.session_state.github_token = github_token
@@ -326,7 +326,7 @@ def main():
         github_owner = st.text_input(
             "GitHubユーザー名/組織名",
             value=st.session_state.get('github_owner', ''),
-            placeholder="your-username",
+            placeholder="Noko-Hishi",
             help="GitHubのユーザー名または組織名"
         )
         st.session_state.github_owner = github_owner
@@ -334,7 +334,7 @@ def main():
         github_repo = st.text_input(
             "リポジトリ名",
             value=st.session_state.get('github_repo', ''),
-            placeholder="tsum-coin-data",
+            placeholder="tsumucoin",
             help="データを保存するリポジトリ名"
         )
         st.session_state.github_repo = github_repo
@@ -382,7 +382,7 @@ def main():
         # 自動送信設定
         auto_send_discord = st.checkbox(
             "📤 記録追加時に自動でDiscordに送信",
-            value=st.session_state.get('auto_send_discord', True),
+            value=st.session_state.get('auto_send_discord', False,
             help="記録を追加した際に自動的にDiscordに送信します"
         )
         st.session_state.auto_send_discord = auto_send_discord
