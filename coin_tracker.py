@@ -316,7 +316,7 @@ def main():
         # GitHub設定の入力（セッション状態で保持）
         github_token = st.text_input(
             "GitHub Personal Access Token",
-            value=st.session_state.get('github_token', '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'),
+            value=st.session_state.get('github_token', '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'),
             type="password",
             placeholder="ghp_xxxxxxxxxxxx",
             help="GitHubのPersonal Access Tokenを入力してください。repo権限が必要です。"
