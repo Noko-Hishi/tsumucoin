@@ -670,4 +670,434 @@ def main():
     data = load_existing_data()
     
     # ツム選択/新規作成
-    st.header("🎯 ツム選
+    st.header("🎯 ツム選択")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # 既存ツムのリスト
+        existing_tsums = list(data.keys()) if data else []
+        
+        if existing_tsums:
+            selected_option = st.radio(
+                "ツムを選択してください",
+                ["既存のツムを選択", "新しいツムを作成"],
+                horizontal=True
+            )
+            
+            if selected_option == "既存のツムを選択":
+                selected_tsum = st.selectbox(
+                    "既存のツム",
+                    existing_tsums,
+                    help="既存のツムから選択"
+                )
+            else:
+                selected_tsum = st.text_input(
+                    "新しいツム名",
+                    placeholder="ツム名を入力してください",
+                    help="新しいツム名を入力"
+                )
+        else:
+            st.info("まだツムが登録されていません。新しいツムを作成してください。")
+            selected_tsum = st.text_input(
+                "新しいツム名",
+                placeholder="ツム名を入力してください",
+                help="新しいツム名を入力"
+            )
+    
+    with col2:
+        if selected_tsum and selected_tsum in data:
+            records_count = len(data[selected_tsum])
+            st.metric("記録数", records_count)
+            
+            if records_count > 0:
+                avg_rate = sum(r["rate"] for r in data[selected_tsum]) / records_count
+                st.metric("平均倍率", f"{avg_rate:.3f}")
+    
+    # 入力フォーム
+    if selected_tsum:
+        st.header("📝 データ入力")
+        
+        # アイテム選択
+        col1, col2 = st.columns(2)
+        with col1:
+            use_5to4 = st.checkbox("5→4 (1800コイン)", help="5→4アイテムを使用した場合")
+        with col2:
+            use_plus_coin = st.checkbox("+Coin (500コイン)", help="+Coinアイテムを使用した場合")
+        
+        # コイン入力
+        col1, col2 = st.columns(2)
+        with col1:
+            base_coin = st.number_input(
+                "ベースコイン",
+                min_value=1,
+                max_value=100000,
+                value=1000,
+                step=100,
+                help="アイテム使用前の基本コイン数"
+            )
+        
+        with col2:
+            boost_coin = st.number_input(
+                "最終コイン",
+                min_value=1,
+                max_value=500000,
+                value=2000,
+                step=100,
+                help="実際に獲得したコイン数"
+            )
+        
+        # プレビュー計算
+        if base_coin > 0 and boost_coin > 0:
+            preview_record = calculate_record(base_coin, boost_coin, use_5to4, use_plus_coin)
+            
+            st.subheader("📊 計算結果プレビュー")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("ベースコイン", f"{preview_record['base']:,}")
+            with col2:
+                st.metric("Boostコイン", f"{preview_record['boost']:,}")
+            with col3:
+                st.metric("Finalコイン", f"{preview_record['final']:,}")
+            with col4:
+                st.metric("倍率", f"{preview_record['rate']:.3f}")
+            
+            # アイテムコスト表示
+            if use_5to4 or use_plus_coin:
+                item_cost = 0
+                if use_5to4:
+                    item_cost += 1800
+                if use_plus_coin:
+                    item_cost += 500
+                st.info(f"アイテムコスト: {item_cost:,}コイン")
+        
+        # Discord設定を取得（Secrets優先）
+        webhook_url = get_config_value('discord_webhook_url', 'DISCORD_WEBHOOK_URL')
+        auto_send_discord = get_config_value('auto_send_discord', 'AUTO_SEND_DISCORD', False)
+        auto_send_json = get_config_value('auto_send_json', 'AUTO_SEND_JSON', False)
+        
+        # セッション状態も確認（手動設定を優先）
+        if 'auto_send_discord' in st.session_state:
+            auto_send_discord = st.session_state['auto_send_discord']
+        if 'auto_send_json' in st.session_state:
+            auto_send_json = st.session_state['auto_send_json']
+        
+        # 記録追加ボタン（Discord機能の有無で分岐）
+        if webhook_url:
+            # Discord機能が有効な場合：3つのボタン
+            col1, col2, col3 = st.columns([2, 1, 1])
+            
+            with col1:
+                add_record_btn = st.button("📝 記録を追加", type="primary", use_container_width=True)
+            
+            with col2:
+                manual_discord_send = st.button("📤 記録送信", use_container_width=True, help="現在の記録をDiscordに送信")
+            
+            with col3:
+                manual_json_send = st.button("📄 JSON送信", use_container_width=True, help="全データをJSONファイルとしてDiscordに送信")
+        else:
+            # Discord機能が無効な場合：記録追加のみ
+            add_record_btn = st.button("📝 記録を追加", type="primary", use_container_width=True)
+            manual_discord_send = False
+            manual_json_send = False
+        
+        # 記録追加処理
+        if add_record_btn:
+            if base_coin > 0 and boost_coin > 0:
+                record = calculate_record(base_coin, boost_coin, use_5to4, use_plus_coin)
+                
+                # データに追加
+                if selected_tsum not in data:
+                    data[selected_tsum] = []
+                
+                data[selected_tsum].append(record)
+                save_data_to_session(data)
+                
+                st.success(f"✅ {selected_tsum} の記録を追加しました！")
+                
+                # 自動Discord送信
+                if auto_send_discord and webhook_url:
+                    success, message = send_to_discord(webhook_url, selected_tsum, record, use_5to4, use_plus_coin)
+                    if success:
+                        st.success("📤 " + message)
+                    else:
+                        st.error("📤 " + message)
+                
+                # 自動JSON送信
+                if auto_send_json and webhook_url:
+                    success, message = send_json_to_discord(webhook_url, data)
+                    if success:
+                        st.success("📄 " + message)
+                    else:
+                        st.error("📄 " + message)
+                
+                # 入力フォームをリセット（オプション）
+                st.rerun()
+            else:
+                st.error("❌ 正しいコイン数を入力してください")
+        
+        # 手動Discord送信処理
+        if manual_discord_send:
+            if base_coin > 0 and boost_coin > 0:
+                record = calculate_record(base_coin, boost_coin, use_5to4, use_plus_coin)
+                success, message = send_to_discord(webhook_url, selected_tsum, record, use_5to4, use_plus_coin)
+                if success:
+                    st.success("📤 " + message)
+                else:
+                    st.error("📤 " + message)
+            else:
+                st.error("❌ 正しいコイン数を入力してください")
+        
+        # 手動JSON送信処理
+        if manual_json_send:
+            if data:
+                success, message = send_json_to_discord(webhook_url, data)
+                if success:
+                    st.success("📄 " + message)
+                else:
+                    st.error("📄 " + message)
+            else:
+                st.error("❌ 送信するデータがありません")
+    
+    # データ表示
+    if data and selected_tsum and selected_tsum in data:
+        st.header(f"📋 {selected_tsum} の記録履歴")
+        
+        records = data[selected_tsum]
+        if records:
+            # 最新の記録から表示
+            records_reversed = list(reversed(records))
+            
+            # テーブル形式で表示
+            df_records = []
+            for i, record in enumerate(records_reversed):
+                df_records.append({
+                    "No.": len(records) - i,
+                    "ベースコイン": f"{record['base']:,}",
+                    "Boostコイン": f"{record['boost']:,}",
+                    "Finalコイン": f"{record['final']:,}",
+                    "倍率": f"{record['rate']:.3f}",
+                })
+            
+            df = pd.DataFrame(df_records)
+            st.dataframe(df, use_container_width=True)
+            
+            # 統計情報
+            st.subheader("📊 統計情報")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            avg_rate = sum(r["rate"] for r in records) / len(records)
+            max_rate = max(r["rate"] for r in records)
+            min_rate = min(r["rate"] for r in records)
+            total_final = sum(r["final"] for r in records)
+            
+            with col1:
+                st.metric("平均倍率", f"{avg_rate:.3f}")
+            with col2:
+                st.metric("最高倍率", f"{max_rate:.3f}")
+            with col3:
+                st.metric("最低倍率", f"{min_rate:.3f}")
+            with col4:
+                st.metric("総獲得コイン", f"{total_final:,}")
+            
+            # 記録削除機能とJSON送信ボタン
+            st.divider()
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🗑️ 最新の記録を削除", help="最後に追加した記録を削除します"):
+                    if st.session_state.get('confirm_delete', False):
+                        data[selected_tsum].pop()
+                        if not data[selected_tsum]:  # 記録が空になった場合
+                            del data[selected_tsum]
+                        save_data_to_session(data)
+                        st.session_state.confirm_delete = False
+                        st.success("記録を削除しました")
+                        st.rerun()
+                    else:
+                        st.session_state.confirm_delete = True
+                        st.warning("もう一度クリックして削除を確定してください")
+            
+            with col2:
+                # JSONファイル送信ボタン（記録がある場合のみ表示）
+                webhook_url_for_json = get_config_value('discord_webhook_url', 'DISCORD_WEBHOOK_URL')
+                if webhook_url_for_json and st.button("📄 全記録をDiscordに送信", help="現在のすべてのデータをJSONファイルとしてDiscordに送信"):
+                    success, message = send_json_to_discord(webhook_url_for_json, data)
+                    if success:
+                        st.success("📄 " + message)
+                    else:
+                        st.error("📄 " + message)
+    
+    # データダウンロード機能
+    st.header("💾 データダウンロード")
+    
+    if data:
+        # JSON文字列を生成
+        json_str = json.dumps(data, ensure_ascii=False, indent=2)
+        
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            st.text_area(
+                "JSON データプレビュー",
+                json_str,
+                height=200,
+                help="PCツールで読み込み可能なJSON形式"
+            )
+        
+        with col2:
+            st.download_button(
+                label="📥 JSONファイルをダウンロード",
+                data=json_str,
+                file_name="coin_data_multi.json",
+                mime="application/json",
+                help="PCツール用のJSONファイルとしてダウンロード",
+                use_container_width=True
+            )
+            
+            # 統計情報
+            total_tsums = len(data)
+            total_records = sum(len(records) for records in data.values())
+            st.metric("ツム数", total_tsums)
+            st.metric("総記録数", total_records)
+    else:
+        st.info("まだデータがありません。ツムを選択して記録を追加してください。")
+    
+    # セットアップガイド
+    st.header("🛠️ セットアップガイド")
+    
+    with st.expander("⚙️ Streamlit Secrets設定方法", expanded=False):
+        st.markdown("""
+        ### Streamlit Secretsとは
+        
+        Streamlit Secretsは、パスワードやAPIキーなどの機密情報を安全に管理する機能です。
+        
+        ### ローカル開発での設定
+        
+        プロジェクトのルートディレクトリに `.streamlit/secrets.toml` ファイルを作成：
+        
+        ```toml
+        # .streamlit/secrets.toml
+        
+        # GitHub設定
+        GITHUB_TOKEN = "ghp_your_personal_access_token_here"
+        GITHUB_OWNER = "your-github-username"
+        GITHUB_REPO = "your-repository-name"
+        GITHUB_PATH = "coin_data_multi.json"
+        
+        # Discord設定
+        DISCORD_WEBHOOK_URL = "https://discord.com/api/webhooks/..."
+        AUTO_SEND_DISCORD = true
+        AUTO_SEND_JSON = false
+        ```
+        
+        ### Streamlit Cloudでの設定
+        
+        1. Streamlit Cloud のアプリダッシュボードにアクセス
+        2. **Settings** → **Secrets** セクションを開く
+        3. 上記と同じ形式でsecretsを設定
+        4. **Save** をクリック
+        
+        ### 設定項目の説明
+        
+        **GitHub設定:**
+        - `GITHUB_TOKEN`: Personal Access Token (repo権限必要)
+        - `GITHUB_OWNER`: GitHubユーザー名または組織名
+        - `GITHUB_REPO`: データ保存用リポジトリ名
+        - `GITHUB_PATH`: 保存するファイル名 (通常: coin_data_multi.json)
+        
+        **Discord設定:**
+        - `DISCORD_WEBHOOK_URL`: Discord Webhook URL
+        - `AUTO_SEND_DISCORD`: 記録追加時の自動送信 (true/false)
+        - `AUTO_SEND_JSON`: JSON自動送信 (true/false)
+        
+        ### セキュリティ上の注意
+        
+        - `secrets.toml` ファイルは `.gitignore` に追加してください
+        - Personal Access Token は他人に見せないでください
+        - 定期的にトークンを再生成することを推奨します
+        """)
+    
+    with st.expander("📖 GitHub連携の設定方法", expanded=False):
+        st.markdown("""
+        ### 1. GitHub Personal Access Tokenの作成
+        
+        1. [GitHub Settings > Developer settings > Personal access tokens](https://github.com/settings/tokens) にアクセス
+        2. **Generate new token (classic)** をクリック
+        3. **Note** に「ツムツムデータ保存用」などと入力
+        4. **Expiration** で有効期限を設定（推奨：90日以上）
+        5. **Scopes** で **repo** にチェック（全てのレポジトリアクセス権限）
+        6. **Generate token** をクリック
+        7. 表示されたトークン（`ghp_`で始まる文字列）をコピーして保存
+        
+        ### 2. データ保存用リポジトリの準備
+        
+        **Option A: 新しいリポジトリを作成**
+        1. GitHubで新しいリポジトリを作成（例：`tsum-coin-data`）
+        2. **Private** または **Public** を選択
+        3. **Initialize with README** はチェックしなくてもOK
+        
+        **Option B: 既存のリポジトリを使用**
+        - 既存のリポジトリにデータファイルを保存することも可能
+        
+        ### 3. Secrets設定（推奨）
+        
+        機密情報はStreamlit Secretsで管理することを強く推奨します。
+        上記の「Streamlit Secrets設定方法」を参照してください。
+        
+        ### 4. 手動設定（Secretsを使わない場合）
+        
+        サイドバーの「GitHub設定」セクションで直接入力も可能ですが、
+        セキュリティ上の理由でSecretsの使用を推奨します。
+        
+        ### 5. 動作確認
+        
+        - **🧪 GitHub接続テスト** ボタンで接続確認
+        - 記録を追加すると自動的にGitHubに保存されます
+        - **🔄 GitHubから最新データを読み込み** で他のデバイスからも同じデータにアクセス可能
+        """)
+    
+    with st.expander("💡 使用方法のヒント", expanded=False):
+        st.markdown("""
+        ### Secrets活用のメリット
+        
+        - **セキュリティ**: 機密情報がコードに含まれない
+        - **利便性**: 毎回入力する必要がない
+        - **共有**: 複数の環境で同じ設定を使用可能
+        - **管理**: 一箇所で設定を管理
+        
+        ### データの永続化について
+        
+        - **GitHub連携**: 設定すると全てのデータがGitHubに自動保存され、再起動後もデータが保持されます
+        - **ローカル保存**: GitHub設定がない場合、ローカルファイルに保存されますが、Streamlit Cloud では再起動時に消える可能性があります
+        
+        ### 複数デバイスでの利用
+        
+        1. 各デバイス/環境で同じSecrets設定を行う
+        2. **🔄 GitHubから最新データを読み込み** で最新状態に同期
+        3. データ追加は自動的にGitHubに反映される
+        
+        ### バックアップとリストア
+        
+        - **📥 JSONファイルをダウンロード**: ローカルバックアップを作成
+        - **既存のJSONファイルを読み込み**: バックアップファイルから復元
+        - Discord連携でJSON自動送信も可能
+        
+        ### トラブルシューティング
+        
+        - GitHub保存に失敗した場合、ローカルファイルにも保存されます
+        - 接続エラーが続く場合は、トークンの権限とリポジトリ名を確認してください
+        - データが見つからない場合は、**🔄 GitHubから最新データを読み込み** を試してください
+        - Secrets設定が反映されない場合は、アプリを再起動してください
+        """)
+    
+    # フッター
+    st.markdown("---")
+    st.markdown(
+        "**ツムツム コイン記録ツール - Streamlit Secrets対応版**  \n"
+        "Streamlit Secretsによる安全な設定管理と、GitHub連携による永続データ保存を実現。  \n"
+        "PCツール互換のJSONファイル形式でデータを管理し、Discord連携も可能です。"
+    )
+
+if __name__ == "__main__":
+    main()
