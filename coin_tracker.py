@@ -7,6 +7,7 @@ import requests
 import pandas as pd
 from io import StringIO
 from datetime import datetime
+import base64
 
 # 設定
 DATA_FILE = "coin_data_multi.json"
@@ -17,6 +18,72 @@ def snap_rate_to_multiplier(rate: float) -> float:
     if rate <= 0 or math.isnan(rate) or math.isinf(rate):
         return rate
     return min(COIN_MULTIPLIERS, key=lambda m: abs(m - rate))
+
+def get_github_file(token, owner, repo, path, branch="main"):
+    """GitHubからファイルを取得"""
+    if not token:
+        return None, "GitHubトークンが設定されていません"
+    
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            file_data = response.json()
+            content = base64.b64decode(file_data['content']).decode('utf-8')
+            return json.loads(content), None
+        elif response.status_code == 404:
+            # ファイルが存在しない場合は空のデータを返す
+            return {}, None
+        else:
+            return None, f"GitHub API エラー: {response.status_code}"
+    except Exception as e:
+        return None, f"エラー: {str(e)}"
+
+def save_to_github(token, owner, repo, path, data, message="Update coin data", branch="main"):
+    """GitHubにファイルを保存"""
+    if not token:
+        return False, "GitHubトークンが設定されていません"
+    
+    url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
+    headers = {
+        "Authorization": f"token {token}",
+        "Accept": "application/vnd.github.v3+json"
+    }
+    
+    try:
+        # まず既存ファイルのSHAを取得
+        response = requests.get(url, headers=headers)
+        sha = None
+        if response.status_code == 200:
+            sha = response.json()['sha']
+        
+        # ファイル内容をBase64エンコード
+        content = json.dumps(data, ensure_ascii=False, indent=2)
+        content_b64 = base64.b64encode(content.encode('utf-8')).decode('utf-8')
+        
+        # ファイルを更新/作成
+        payload = {
+            "message": message,
+            "content": content_b64,
+            "branch": branch
+        }
+        
+        if sha:
+            payload["sha"] = sha
+        
+        response = requests.put(url, json=payload, headers=headers)
+        
+        if response.status_code in [200, 201]:
+            return True, "✅ GitHubに保存成功"
+        else:
+            return False, f"❌ GitHub保存失敗: {response.status_code} - {response.text}"
+    except Exception as e:
+        return False, f"❌ エラー: {str(e)}"
 
 def send_to_discord(webhook_url, tsum_name, record, use_5to4=False, use_plus_coin=False):
     """Discord Webhookに記録を送信"""
@@ -142,25 +209,60 @@ def send_json_to_discord(webhook_url, json_data, filename="coin_data_multi.json"
         return False, f"❌ エラー: {str(e)}"
 
 def load_existing_data():
-    """既存のJSONデータを読み込む（ファイルとセッション状態から）"""
+    """既存のデータを読み込む（GitHub優先、次にセッション状態）"""
     if 'coin_data' not in st.session_state:
-        # まずファイルから読み込みを試行
-        if os.path.exists(DATA_FILE):
-            try:
-                with open(DATA_FILE, 'r', encoding='utf-8') as f:
-                    st.session_state.coin_data = json.load(f)
-                st.info(f"✅ 既存のデータファイル ({DATA_FILE}) を読み込みました")
-            except Exception as e:
-                st.warning(f"データファイル読み込みエラー: {e}")
+        # GitHub設定を確認
+        github_token = st.session_state.get('github_token', '')
+        github_owner = st.session_state.get('github_owner', '')
+        github_repo = st.session_state.get('github_repo', '')
+        github_path = st.session_state.get('github_path', DATA_FILE)
+        
+        if github_token and github_owner and github_repo:
+            # GitHubからデータを読み込み
+            data, error = get_github_file(github_token, github_owner, github_repo, github_path)
+            if error:
+                st.warning(f"GitHub読み込みエラー: {error}")
                 st.session_state.coin_data = {}
+            else:
+                st.session_state.coin_data = data
+                if data:
+                    st.success(f"✅ GitHubからデータを読み込みました ({len(data)} ツム)")
         else:
-            st.session_state.coin_data = {}
+            # ローカルファイルを試行（後方互換性）
+            if os.path.exists(DATA_FILE):
+                try:
+                    with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                        st.session_state.coin_data = json.load(f)
+                    st.info(f"✅ ローカルファイル ({DATA_FILE}) を読み込みました")
+                except Exception as e:
+                    st.warning(f"ローカルファイル読み込みエラー: {e}")
+                    st.session_state.coin_data = {}
+            else:
+                st.session_state.coin_data = {}
     return st.session_state.coin_data
 
 def save_data_to_session(data):
-    """データをセッション状態とファイルに保存"""
+    """データをセッション状態とGitHub/ローカルファイルに保存"""
     st.session_state.coin_data = data
-    save_data_to_file(data)
+    
+    # GitHub設定を確認
+    github_token = st.session_state.get('github_token', '')
+    github_owner = st.session_state.get('github_owner', '')
+    github_repo = st.session_state.get('github_repo', '')
+    github_path = st.session_state.get('github_path', DATA_FILE)
+    
+    if github_token and github_owner and github_repo:
+        # GitHubに保存
+        success, message = save_to_github(github_token, github_owner, github_repo, github_path, data)
+        if success:
+            st.session_state.last_github_save = "成功"
+        else:
+            st.session_state.last_github_save = f"失敗: {message}"
+            # GitHub保存に失敗した場合はローカルファイルにも保存
+            save_data_to_file(data)
+    else:
+        # ローカルファイルに保存
+        save_data_to_file(data)
 
 def save_data_to_file(data):
     """データをJSONファイルに保存"""
@@ -204,28 +306,78 @@ def main():
     )
     
     st.title("🪙 ツムツム コイン記録ツール")
-    st.subheader("Discord Webhook対応 データ入力アプリ")
+    st.subheader("GitHub連携対応 永続データ保存版")
     
-    # サイドバーでDiscord設定とデータ管理
+    # サイドバーでGitHub設定とDiscord設定
     with st.sidebar:
+        # GitHub設定
+        st.header("🐙 GitHub設定")
+        
+        # GitHub設定の入力（セッション状態で保持）
+        github_token = st.text_input(
+            "GitHub Personal Access Token",
+            value=st.session_state.get('github_token', ''),
+            type="password",
+            placeholder="ghp_xxxxxxxxxxxx",
+            help="GitHubのPersonal Access Tokenを入力してください。repo権限が必要です。"
+        )
+        st.session_state.github_token = github_token
+        
+        github_owner = st.text_input(
+            "GitHubユーザー名/組織名",
+            value=st.session_state.get('github_owner', ''),
+            placeholder="your-username",
+            help="GitHubのユーザー名または組織名"
+        )
+        st.session_state.github_owner = github_owner
+        
+        github_repo = st.text_input(
+            "リポジトリ名",
+            value=st.session_state.get('github_repo', ''),
+            placeholder="tsum-coin-data",
+            help="データを保存するリポジトリ名"
+        )
+        st.session_state.github_repo = github_repo
+        
+        github_path = st.text_input(
+            "ファイルパス",
+            value=st.session_state.get('github_path', DATA_FILE),
+            placeholder="coin_data_multi.json",
+            help="GitHub上でのファイルパス"
+        )
+        st.session_state.github_path = github_path
+        
+        # GitHub接続テスト
+        if github_token and github_owner and github_repo:
+            if st.button("🧪 GitHub接続テスト"):
+                data, error = get_github_file(github_token, github_owner, github_repo, github_path)
+                if error:
+                    st.error(f"❌ 接続失敗: {error}")
+                else:
+                    st.success(f"✅ 接続成功！ ({len(data)} ツムのデータ)")
+        
+        # 最後の保存状況
+        if 'last_github_save' in st.session_state:
+            status = st.session_state.last_github_save
+            if "成功" in status:
+                st.success(f"💾 GitHub保存: {status}")
+            else:
+                st.error(f"💾 GitHub保存: {status}")
+        
+        st.divider()
+        
         # Discord Webhook設定
         st.header("🔗 Discord設定")
         
         # Webhook URLの入力（セッション状態で保持）
-        if 'discord_webhook_url' not in st.session_state:
-            st.session_state.discord_webhook_url = ""
-        
         webhook_url = st.text_input(
             "Discord Webhook URL",
-            value=st.session_state.discord_webhook_url,
+            value=st.session_state.get('discord_webhook_url', ''),
             type="password",
             placeholder="https://discord.com/api/webhooks/...",
             help="DiscordサーバーのWebhook URLを入力してください"
         )
-        
-        # Webhook URLをセッション状態に保存
-        if webhook_url != st.session_state.discord_webhook_url:
-            st.session_state.discord_webhook_url = webhook_url
+        st.session_state.discord_webhook_url = webhook_url
         
         # 自動送信設定
         auto_send_discord = st.checkbox(
@@ -243,7 +395,7 @@ def main():
         )
         st.session_state.auto_send_json = auto_send_json
         
-        # Webhook テスト
+        # Discord テスト
         if webhook_url:
             col1, col2 = st.columns(2)
             with col1:
@@ -302,49 +454,33 @@ def main():
         
         st.divider()
         
-        # ファイル情報表示
-        st.header("📂 ファイル情報")
+        # データ操作ボタン
+        st.header("🔄 データ操作")
         
-        # 現在のデータファイルの状態表示
-        current_dir = os.getcwd()
-        file_path = os.path.join(current_dir, DATA_FILE)
-        
-        st.write(f"**保存場所**: `{file_path}`")
-        
-        if os.path.exists(DATA_FILE):
-            file_size = os.path.getsize(DATA_FILE)
-            file_mtime = os.path.getmtime(DATA_FILE)
-            last_modified = datetime.fromtimestamp(file_mtime).strftime("%Y-%m-%d %H:%M:%S")
-            
-            st.success("✅ ファイルが存在します")
-            st.write(f"**ファイルサイズ**: {file_size} bytes")
-            st.write(f"**最終更新**: {last_modified}")
-        else:
-            st.warning("⚠️ データファイルはまだ作成されていません")
-        
-        st.divider()
-        
-        # プロジェクト内のJSONファイル一覧
-        st.header("📋 JSONファイル一覧")
-        
-        json_files = [f for f in os.listdir('.') if f.endswith('.json')]
-        
-        if json_files:
-            for json_file in json_files:
-                file_size = os.path.getsize(json_file)
-                if json_file == DATA_FILE:
-                    st.write(f"🎯 **{json_file}** (現在のファイル) - {file_size} bytes")
+        if st.button("🔄 GitHubから最新データを読み込み", help="GitHubから最新のデータを取得します"):
+            if github_token and github_owner and github_repo:
+                data, error = get_github_file(github_token, github_owner, github_repo, github_path)
+                if error:
+                    st.error(f"読み込みエラー: {error}")
                 else:
-                    st.write(f"📄 {json_file} - {file_size} bytes")
-        else:
-            st.info("JSONファイルが見つかりません")
+                    st.session_state.coin_data = data
+                    st.success(f"✅ GitHubからデータを読み込みました ({len(data)} ツム)")
+                    st.rerun()
+            else:
+                st.error("GitHub設定が不完全です")
         
-        # 手動保存ボタン
-        st.divider()
         data_for_save = load_existing_data()
-        if data_for_save and st.button("💾 手動でファイルに保存", help="現在のデータを手動でファイルに保存します"):
-            if save_data_to_file(data_for_save):
-                st.success("✅ ファイルに保存しました")
+        if data_for_save and st.button("💾 手動でGitHubに保存", help="現在のデータを手動でGitHubに保存します"):
+            if github_token and github_owner and github_repo:
+                success, message = save_to_github(github_token, github_owner, github_repo, github_path, data_for_save)
+                if success:
+                    st.success(message)
+                    st.session_state.last_github_save = "成功"
+                else:
+                    st.error(message)
+                    st.session_state.last_github_save = f"失敗: {message}"
+            else:
+                st.error("GitHub設定が不完全です")
         
         # 全データ削除機能
         st.divider()
@@ -372,15 +508,9 @@ def main():
                 with col2:
                     if st.button("💀 削除実行", help="すべてのデータを削除します", type="primary"):
                         # セッションデータ削除
-                        st.session_state.coin_data = {}
-                        
-                        # ファイル削除
-                        try:
-                            if os.path.exists(DATA_FILE):
-                                os.remove(DATA_FILE)
-                            st.success("✅ すべてのデータを削除しました")
-                        except Exception as e:
-                            st.error(f"ファイル削除エラー: {e}")
+                        empty_data = {}
+                        save_data_to_session(empty_data)
+                        st.success("✅ すべてのデータを削除しました")
                         
                         # 確認状態をリセット
                         st.session_state.confirm_delete_all = False
@@ -679,11 +809,86 @@ def main():
     else:
         st.info("まだデータがありません。ツムを選択して記録を追加してください。")
     
+    # セットアップガイド
+    st.header("🛠️ セットアップガイド")
+    
+    with st.expander("📖 GitHub連携の設定方法", expanded=False):
+        st.markdown("""
+        ### 1. GitHub Personal Access Tokenの作成
+        
+        1. [GitHub Settings > Developer settings > Personal access tokens](https://github.com/settings/tokens) にアクセス
+        2. **Generate new token (classic)** をクリック
+        3. **Note** に「ツムツムデータ保存用」などと入力
+        4. **Expiration** で有効期限を設定（推奨：90日以上）
+        5. **Scopes** で **repo** にチェック（全てのレポジトリアクセス権限）
+        6. **Generate token** をクリック
+        7. 表示されたトークン（`ghp_`で始まる文字列）をコピーして保存
+        
+        ### 2. データ保存用リポジトリの準備
+        
+        **Option A: 新しいリポジトリを作成**
+        1. GitHubで新しいリポジトリを作成（例：`tsum-coin-data`）
+        2. **Private** または **Public** を選択
+        3. **Initialize with README** はチェックしなくてもOK
+        
+        **Option B: 既存のリポジトリを使用**
+        - 既存のリポジトリにデータファイルを保存することも可能
+        
+        ### 3. アプリでの設定
+        
+        1. サイドバーの「GitHub設定」セクションで以下を入力：
+           - **GitHub Personal Access Token**: 作成したトークン
+           - **GitHubユーザー名/組織名**: あなたのGitHubユーザー名
+           - **リポジトリ名**: データ保存用のリポジトリ名
+           - **ファイルパス**: `coin_data_multi.json`（デフォルト）
+        
+        2. **🧪 GitHub接続テスト** ボタンで接続確認
+        
+        ### 4. 動作確認
+        
+        - 記録を追加すると自動的にGitHubに保存されます
+        - **🔄 GitHubから最新データを読み込み** で他のデバイスからも同じデータにアクセス可能
+        - **💾 手動でGitHubに保存** で任意のタイミングで保存可能
+        
+        ### 注意事項
+        
+        - Personal Access Tokenは他人に見せないでください
+        - Private リポジトリを使用することを推奨します
+        - トークンの有効期限が切れた場合は再作成が必要です
+        """)
+    
+    with st.expander("💡 使用方法のヒント", expanded=False):
+        st.markdown("""
+        ### データの永続化について
+        
+        - **GitHub連携**: 設定すると全てのデータがGitHubに自動保存され、再起動後もデータが保持されます
+        - **ローカル保存**: GitHub設定がない場合、ローカルファイルに保存されますが、Streamlit Cloud では再起動時に消える可能性があります
+        
+        ### 複数デバイスでの利用
+        
+        1. 各デバイスで同じGitHub設定を行う
+        2. **🔄 GitHubから最新データを読み込み** で最新状態に同期
+        3. データ追加は自動的にGitHubに反映される
+        
+        ### バックアップとリストア
+        
+        - **📥 JSONファイルをダウンロード**: ローカルバックアップを作成
+        - **既存のJSONファイルを読み込み**: バックアップファイルから復元
+        - Discord連携でJSON自動送信も可能
+        
+        ### トラブルシューティング
+        
+        - GitHub保存に失敗した場合、ローカルファイルにも保存されます
+        - 接続エラーが続く場合は、トークンの権限とリポジトリ名を確認してください
+        - データが見つからない場合は、**🔄 GitHubから最新データを読み込み** を試してください
+        """)
+    
     # フッター
     st.markdown("---")
     st.markdown(
-        "**ツムツム コイン記録ツール** - PCツール互換のスマートフォン対応データ入力アプリ  \n"
-        "作成されたJSONファイルはPCツールで直接読み込み可能です。"
+        "**ツムツム コイン記録ツール - GitHub連携版**  \n"
+        "GitHub連携により、データの永続保存と複数デバイス間での同期が可能です。  \n"
+        "PCツール互換のJSONファイル形式でデータを管理します。"
     )
 
 if __name__ == "__main__":
