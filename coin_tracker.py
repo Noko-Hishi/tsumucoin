@@ -326,7 +326,7 @@ def main():
         github_owner = st.text_input(
             "GitHubユーザー名/組織名",
             value=st.session_state.get('github_owner', 'Noko-Hishi'),
-            placeholder="User-Name"
+            placeholder="User-Name",
             help="GitHubのユーザー名または組織名"
         )
         st.session_state.github_owner = github_owner
