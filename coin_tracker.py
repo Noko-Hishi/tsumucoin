@@ -372,7 +372,7 @@ def main():
         # Webhook URLの入力（セッション状態で保持）
         webhook_url = st.text_input(
             "Discord Webhook URL",
-            value=st.session_state.get('discord_webhook_url', 'https://discord.com/api/webhooks/1413040386443837490/8WcOdeEa51RCO95I6RrliGK5VnXotZqqCd2xb-YvNTRt3xXGlKavny5kjEAs7Z_gGPei'),
+            value=st.session_state.get('discord_webhook_url', ''),
             type="password",
             placeholder="https://discord.com/api/webhooks/...",
             help="DiscordサーバーのWebhook URLを入力してください"
@@ -382,7 +382,7 @@ def main():
         # 自動送信設定
         auto_send_discord = st.checkbox(
             "📤 記録追加時に自動でDiscordに送信",
-            value=st.session_state.get('auto_send_discord', False),
+            value=st.session_state.get('auto_send_discord', True),
             help="記録を追加した際に自動的にDiscordに送信します"
         )
         st.session_state.auto_send_discord = auto_send_discord
@@ -811,55 +811,6 @@ def main():
     
     # セットアップガイド
     st.header("🛠️ セットアップガイド")
-    
-    with st.expander("🛠️ Streamlit Secrets 設定方法", expanded=False):
-        st.markdown("""
-        ### 1. Streamlit Cloud での Secrets 設定
-        
-        1. [Streamlit Cloud](https://share.streamlit.io/) にログイン
-        2. あなたのアプリのダッシュボードに移動
-        3. アプリの **⚙️ Settings** をクリック
-        4. **Secrets** タブを選択
-        5. 以下の形式で設定を追加：
-        
-        ```toml
-        [github]
-        token = "ghp_your_personal_access_token_here"
-        owner = "your-github-username"
-        repo = "your-repository-name"
-        path = "coin_data_multi.json"
-        
-        [discord]
-        webhook_url = "https://discord.com/api/webhooks/your-webhook-url"
-        auto_send = true
-        auto_send_json = false
-        ```
-        
-        ### 2. GitHub Personal Access Token の作成
-        
-        1. [GitHub Settings > Developer settings > Personal access tokens](https://github.com/settings/tokens)
-        2. **Generate new token (classic)**
-        3. **Scopes** で **repo** にチェック
-        4. 生成されたトークンをコピーして上記の `token` に設定
-        
-        ### 3. Discord Webhook URL の取得
-        
-        1. Discordサーバーの設定 > 連携サービス > ウェブフック
-        2. **新しいウェブフック** を作成
-        3. **ウェブフックURLをコピー** して上記の `webhook_url` に設定
-        
-        ### 4. 設定完了後
-        
-        - アプリを再起動（Streamlit Cloud で **Reboot**）
-        - 設定が自動的に読み込まれます
-        - 毎回の入力が不要になります！
-        
-        ### 注意事項
-        
-        - Secrets は安全に暗号化されて保存されます
-        - Private リポジトリの使用を推奨します
-        - トークンは定期的に更新してください
-        """)
     
     with st.expander("📖 GitHub連携の設定方法", expanded=False):
         st.markdown("""
