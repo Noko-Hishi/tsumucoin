@@ -34,6 +34,13 @@
       "final": 4657,
       "rate_raw": 1.299888,
       "rate": 1.3
+    },
+    {
+      "base": 6020,
+      "boost": 7826,
+      "final": 5526,
+      "rate_raw": 1.3,
+      "rate": 1.3
     }
   ]
 }
