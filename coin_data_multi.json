@@ -139,6 +139,13 @@
       "final": 7174,
       "rate_raw": 1.5,
       "rate": 1.5
+    },
+    {
+      "base": 5336,
+      "boost": 8004,
+      "final": 5704,
+      "rate_raw": 1.5,
+      "rate": 1.5
     }
   ],
   "Cバズsl4": [
